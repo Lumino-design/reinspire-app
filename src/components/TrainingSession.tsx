@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { BreathingVisualizer } from './BreathingVisualizer'
 import { formatSeconds } from '../utils/date'
 
 type SessionProps = {
@@ -10,62 +11,93 @@ type SessionProps = {
 
 type SessionState = 'idle' | 'running' | 'finished'
 
-type Phase = {
-  type: 'rest' | 'hold'
-  duration: number
-  round: number
-}
+type Segment =
+  | {
+      kind: 'breathe'
+      label: 'Inhale' | 'Exhale'
+      duration: number
+      round: number
+      segmentIndex: number
+    }
+  | {
+      kind: 'hold'
+      duration: number
+      round: number
+    }
 
-const REST_DURATION = 20
 const HOLD_ADJUSTMENTS = [-4, -2, 0, 2, 4]
 const MIN_HOLD = 5
+const BREATHING_PATTERN: { label: 'Inhale' | 'Exhale'; duration: number }[] = [
+  { label: 'Inhale', duration: 4 },
+  { label: 'Exhale', duration: 6 },
+  { label: 'Inhale', duration: 4 },
+  { label: 'Exhale', duration: 6 },
+]
 
 export function TrainingSession({ rpSeconds, onBack, onComplete, onCancel }: SessionProps) {
   const [sessionState, setSessionState] = useState<SessionState>('idle')
-  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0)
-  const [timeRemaining, setTimeRemaining] = useState(0)
+  const [segmentIndex, setSegmentIndex] = useState(0)
+  const [segmentMetrics, setSegmentMetrics] = useState({ remaining: 0, progress: 0 })
   const completionNotified = useRef(false)
+  const frameRef = useRef<number | null>(null)
 
-  const phases = useMemo<Phase[]>(() => {
+  const segments = useMemo<Segment[]>(() => {
     return HOLD_ADJUSTMENTS.flatMap((adjustment, index) => {
       const round = index + 1
       const hold = Math.max(MIN_HOLD, rpSeconds + adjustment)
-      return [
-        { type: 'rest', duration: REST_DURATION, round },
-        { type: 'hold', duration: hold, round },
-      ]
+      const breathingSegments: Segment[] = BREATHING_PATTERN.map((pattern, patternIndex) => ({
+        kind: 'breathe',
+        label: pattern.label,
+        duration: pattern.duration,
+        round,
+        segmentIndex: patternIndex,
+      }))
+      return [...breathingSegments, { kind: 'hold', duration: hold, round }]
     })
   }, [rpSeconds])
 
-  useEffect(() => {
-    if (sessionState !== 'running') return
-    const phase = phases[currentPhaseIndex]
-    if (!phase) return
-
-    const interval = window.setInterval(() => {
-      setTimeRemaining((prev) => {
-        if (prev <= 1) {
-          window.clearInterval(interval)
-          setCurrentPhaseIndex((prevIndex) => prevIndex + 1)
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-
-    return () => window.clearInterval(interval)
-  }, [sessionState, currentPhaseIndex, phases])
+  const clearFrame = () => {
+    if (frameRef.current) {
+      cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+    }
+  }
 
   useEffect(() => {
-    const phase = phases[currentPhaseIndex]
-    if (!phase) {
-      if (sessionState === 'running') {
-        setSessionState('finished')
-      }
+    if (sessionState !== 'running') {
+      clearFrame()
       return
     }
-    setTimeRemaining(phase.duration)
-  }, [currentPhaseIndex, phases, sessionState])
+
+    const segment = segments[segmentIndex]
+    if (!segment) {
+      setSessionState('finished')
+      return
+    }
+
+    const startAt = performance.now()
+    const durationMs = segment.duration * 1000
+    setSegmentMetrics({ remaining: segment.duration, progress: 0 })
+
+    const tick = () => {
+      const elapsed = performance.now() - startAt
+      const progress = Math.min(1, elapsed / durationMs)
+      const remaining = Math.max(0, segment.duration - elapsed / 1000)
+
+      setSegmentMetrics({ remaining, progress })
+
+      if (elapsed >= durationMs) {
+        setSegmentIndex((prev) => prev + 1)
+        return
+      }
+
+      frameRef.current = requestAnimationFrame(tick)
+    }
+
+    frameRef.current = requestAnimationFrame(tick)
+
+    return clearFrame
+  }, [segmentIndex, segments, sessionState])
 
   useEffect(() => {
     if (sessionState === 'finished' && !completionNotified.current) {
@@ -76,28 +108,40 @@ export function TrainingSession({ rpSeconds, onBack, onComplete, onCancel }: Ses
 
   const handleBegin = () => {
     completionNotified.current = false
+    setSegmentIndex(0)
+    setSegmentMetrics({ remaining: segments[0]?.duration ?? 0, progress: 0 })
     setSessionState('running')
-    setCurrentPhaseIndex(0)
-    setTimeRemaining(phases[0]?.duration ?? 0)
   }
 
   const handleStop = () => {
     completionNotified.current = false
+    clearFrame()
     setSessionState('idle')
-    setCurrentPhaseIndex(0)
-    setTimeRemaining(0)
+    setSegmentIndex(0)
+    setSegmentMetrics({ remaining: 0, progress: 0 })
     onCancel()
   }
 
-  const phase = phases[currentPhaseIndex] ?? null
   const totalRounds = HOLD_ADJUSTMENTS.length
-  const isRunning = sessionState === 'running'
+  const currentSegment = sessionState === 'running' ? segments[segmentIndex] ?? null : null
 
   const summaryRows = HOLD_ADJUSTMENTS.map((adjustment, index) => {
     const round = index + 1
     const hold = Math.max(MIN_HOLD, rpSeconds + adjustment)
     return { round, hold }
   })
+
+  const roundLabel = currentSegment?.round ?? segments[segments.length - 1]?.round ?? 1
+
+  const visualizerMode =
+    currentSegment?.kind === 'breathe'
+      ? currentSegment.label === 'Inhale'
+        ? 'inhale'
+        : 'exhale'
+      : 'hold'
+
+  const secondsRemaining = segmentMetrics.remaining
+  const totalSeconds = currentSegment?.duration ?? 0
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-6 py-12 text-slate-100">
@@ -112,7 +156,7 @@ export function TrainingSession({ rpSeconds, onBack, onComplete, onCancel }: Ses
 
         <h2 className="text-3xl font-semibold text-white">CO2 Tolerance Session</h2>
         <p className="mt-2 text-white/60">
-          Alternate 20 second breathing windows with progressive holds based on your relaxed pause.
+          Alternate two paced breathing cycles with progressive holds based on your relaxed pause.
         </p>
 
         {sessionState === 'idle' && (
@@ -127,7 +171,7 @@ export function TrainingSession({ rpSeconds, onBack, onComplete, onCancel }: Ses
                 {summaryRows.map(({ round, hold }) => (
                   <Fragment key={round}>
                     <span className="font-medium text-white">{round}</span>
-                    <span className="text-white/80">{REST_DURATION}s</span>
+                    <span className="text-white/80">20s</span>
                     <span className="text-white/80">{hold}s</span>
                   </Fragment>
                 ))}
@@ -153,13 +197,38 @@ export function TrainingSession({ rpSeconds, onBack, onComplete, onCancel }: Ses
           </>
         )}
 
-        {isRunning && phase && (
+        {sessionState === 'running' && currentSegment && (
           <div className="mt-8 flex flex-col items-center gap-6 rounded-2xl bg-sanctuary-soft/70 p-10 text-center shadow-glow">
             <span className="text-sm uppercase tracking-[0.3em] text-white/40">
-              Round {phase.round} of {totalRounds}
+              Round {roundLabel} of {totalRounds}
             </span>
-            <span className="text-xl text-white/70">{phase.type === 'rest' ? 'Breathe' : 'Hold'}</span>
-            <span className="text-6xl font-semibold text-white">{timeRemaining}s</span>
+
+            {currentSegment.kind === 'breathe' ? (
+              <>
+                <p className="text-xl text-white/70">{currentSegment.label}</p>
+                <BreathingVisualizer
+                  mode={visualizerMode}
+                  secondsRemaining={secondsRemaining}
+                  totalSeconds={totalSeconds}
+                  progress={segmentMetrics.progress}
+                />
+                <p className="text-sm text-white/50">
+                  Cycle {currentSegment.segmentIndex < 2 ? 1 : 2} of 2
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xl text-white/70">Hold</p>
+                <BreathingVisualizer
+                  mode="hold"
+                  secondsRemaining={secondsRemaining}
+                  totalSeconds={totalSeconds}
+                  progress={segmentMetrics.progress}
+                />
+                <p className="text-sm text-white/50">Stay calm, breathe in gently when ready.</p>
+              </>
+            )}
+
             <button
               type="button"
               onClick={handleStop}

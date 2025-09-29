@@ -54,21 +54,32 @@ export function Sanctuary({
         </section>
 
         <div className="flex flex-col gap-3">
-          <button
-            type="button"
-            onClick={onStartSession}
-            disabled={!hasRp}
-            className="rounded-full bg-white/90 px-6 py-3 text-base font-medium text-sanctuary-base transition hover:bg-white disabled:cursor-not-allowed disabled:bg-white/30 disabled:text-white/40"
-          >
-            Start Today&apos;s Session
-          </button>
-          <button
-            type="button"
-            onClick={onCalibrate}
-            className="rounded-full border border-white/20 px-6 py-3 text-base font-medium text-white transition hover:border-white/40 hover:text-white"
-          >
-            Measure Relaxed Pause
-          </button>
+          {hasRp ? (
+            <>
+              <button
+                type="button"
+                onClick={onStartSession}
+                className="rounded-full bg-white/90 px-6 py-3 text-base font-medium text-sanctuary-base transition hover:bg-white"
+              >
+                Start Today&apos;s Session
+              </button>
+              <button
+                type="button"
+                onClick={onCalibrate}
+                className="text-sm font-medium text-white/50 transition hover:text-white"
+              >
+                Recalibrate
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onCalibrate}
+              className="rounded-full bg-white/90 px-6 py-3 text-base font-medium text-sanctuary-base transition hover:bg-white"
+            >
+              Calibrate Your Breathing
+            </button>
+          )}
         </div>
       </div>
     </div>

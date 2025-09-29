@@ -3,7 +3,7 @@ import { RelaxedPauseCalibration } from './components/RelaxedPauseCalibration'
 import { Sanctuary } from './components/Sanctuary'
 import { TrainingSession } from './components/TrainingSession'
 import { useStoredState } from './hooks/useStoredState'
-import { isYesterday, toIsoDate } from './utils/date'
+import { toIsoDate } from './utils/date'
 
 type View = 'sanctuary' | 'calibration' | 'session'
 
@@ -22,10 +22,7 @@ function App() {
     null,
   )
   const [streak, setStreak] = useStoredState<number>(STORAGE_KEYS.streak, 0)
-  const [lastSessionDate, setLastSessionDate] = useStoredState<string | null>(
-    STORAGE_KEYS.lastSession,
-    null,
-  )
+  const [, setLastSessionDate] = useStoredState<string | null>(STORAGE_KEYS.lastSession, null)
 
   const handleSaveRelaxedPause = useCallback(
     (seconds: number) => {
@@ -42,14 +39,9 @@ function App() {
   }, [rpSeconds])
 
   const handleSessionComplete = useCallback(() => {
-    const todayIso = toIsoDate(new Date())
-    setStreak((current) => {
-      if (lastSessionDate === todayIso) return current
-      if (isYesterday(lastSessionDate, todayIso)) return current + 1
-      return 1
-    })
-    setLastSessionDate(todayIso)
-  }, [lastSessionDate, setLastSessionDate, setStreak])
+    setStreak((current) => current + 1)
+    setLastSessionDate(toIsoDate(new Date()))
+  }, [setLastSessionDate, setStreak])
 
   const handleSessionExit = useCallback(() => {
     setView('sanctuary')
